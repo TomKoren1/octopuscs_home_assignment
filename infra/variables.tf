@@ -38,9 +38,3 @@ variable "create_github_oidc_provider" {
   type        = bool
   default     = true
 }
-
-variable "budget_email" {
-  description = "Email address for the cost alert. Leave empty to skip the budget."
-  type        = string
-  default     = ""
-}

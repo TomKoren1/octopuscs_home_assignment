@@ -211,8 +211,7 @@ docker compose exec nginx nc -zw2 mongo 27017   # "bad address 'mongo'"
 │   ├── ec2.tf                 # the server and its role
 │   ├── user_data.sh.tftpl     # the server's first-boot script
 │   ├── ecr.tf                 # image registry
-│   ├── deploy.tf              # GitHub OIDC role + the SSM deploy document
-│   └── budget.tf              # cost alert
+│   └── deploy.tf              # GitHub OIDC role + the SSM deploy document
 └── docs/                      # images used in this README
 ```
 
@@ -279,7 +278,6 @@ see which commit is live.
 | ECR repository | Immutable tags, scan on push, keeps the last 5 images. |
 | SSM document | The fixed deploy script. Its only input is a 40-character commit SHA. |
 | GitHub OIDC role | Can be assumed only by this repository's `main` branch. May only push to this ECR repository and start this one SSM document on this one instance. |
-| Budget | Emails an alert as soon as the account spends one cent. |
 
 ### Security choices
 
@@ -300,7 +298,7 @@ You need Terraform, the AWS CLI with credentials, and the GitHub CLI (`gh`).
 
 ```bash
 cd infra
-cp terraform.tfvars.example terraform.tfvars   # set your email
+cp terraform.tfvars.example terraform.tfvars   # optional: adjust the settings
 ./apply.sh       # create everything, connect the pipeline, wait for the site
 ./destroy.sh     # delete everything again
 ```
