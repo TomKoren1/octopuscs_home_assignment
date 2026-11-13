@@ -6,6 +6,8 @@ const { MongoClient } = require("mongodb");
 const PORT = process.env.PORT || 3000;
 const MONGO_URL = process.env.MONGO_URL || "mongodb://mongo:27017";
 const MONGO_DB = process.env.MONGO_DB || "store";
+// Which build is running: CI bakes the git commit SHA into the image.
+const APP_VERSION = process.env.APP_VERSION || "dev";
 
 // One client for the whole process. It keeps a connection pool and
 // reconnects by itself, so we never open a connection per request.
@@ -52,7 +54,7 @@ app.get("/", async (req, res) => {
     <div class="basket" aria-hidden="true">${emojis}</div>
     <form method="post" action="/apples"><button class="primary">Add an apple 🍎</button></form>
     <form method="post" action="/apples/reset"><button>Reset to ${SEED_APPLES}</button></form>
-    <small>Served by container: ${os.hostname()}</small>
+    <small>Served by container: ${os.hostname()} · version: ${APP_VERSION.slice(0, 7)}</small>
   </body>
 </html>`);
   } catch (err) {
@@ -88,7 +90,7 @@ app.post("/apples/reset", async (req, res) => {
 app.get("/health", async (req, res) => {
   try {
     await client.db("admin").command({ ping: 1 });
-    res.json({ status: "ok" });
+    res.json({ status: "ok", version: APP_VERSION });
   } catch (err) {
     res.status(503).json({ status: "error", message: err.message });
   }

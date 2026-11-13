@@ -3,6 +3,7 @@
 #   1. install Docker if it is missing
 #   2. create .env (with a random DB password) if it is missing
 #   3. build + start all containers and wait until they are healthy
+#      (or, if APP_IMAGE is set, pull that pre-built image instead of building)
 #   4. smoke-test: the page must show the apple count stored in MongoDB
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -33,10 +34,19 @@ HTTP_PORT="${HTTP_PORT:-$(grep -s '^HTTP_PORT=' .env | cut -d= -f2 || true)}"
 HTTP_PORT="${HTTP_PORT:-80}"
 URL="http://localhost:${HTTP_PORT}"
 
-# --- 3. Build + start ------------------------------------------------------
-log "Building images and starting containers (waiting for healthchecks)"
-$DOCKER compose up -d --build --wait \
-  || die "Stack failed to start. If port ${HTTP_PORT} is busy, retry with: HTTP_PORT=8080 ./provision.sh"
+# --- 3. Build (or pull) + start ---------------------------------------------
+if [ -n "${APP_IMAGE:-}" ]; then
+  # Deploy mode (used by CD): run a pre-built image from a registry.
+  log "Pulling ${APP_IMAGE} and starting containers (waiting for healthchecks)"
+  COMPOSE="$DOCKER compose -f docker-compose.yml -f docker-compose.deploy.yml"
+  $COMPOSE pull app || die "Could not pull ${APP_IMAGE}"
+  $COMPOSE up -d --no-build --wait || die "Stack failed to start"
+else
+  # Default mode: build the app image from source.
+  log "Building images and starting containers (waiting for healthchecks)"
+  $DOCKER compose up -d --build --wait \
+    || die "Stack failed to start. If port ${HTTP_PORT} is busy, retry with: HTTP_PORT=8080 ./provision.sh"
+fi
 
 # --- 4. Smoke test ---------------------------------------------------------
 # The requirement: "the html page returns the number of apples in the DB".
