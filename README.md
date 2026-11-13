@@ -187,22 +187,33 @@ docker compose exec nginx nc -zw2 mongo 27017   # "bad address 'mongo'"
 
 ```
 .
-├── provision.sh           # one-command provisioning + smoke test
-├── topology.sh            # live view of containers, networks, volumes
-├── teardown.sh            # remove everything
-├── docker-compose.yml     # the whole architecture
-├── .env.example           # variables; provision.sh copies it to .env
+├── provision.sh               # one-command provisioning + smoke test
+├── topology.sh                # live view of containers, networks, volumes
+├── teardown.sh                # remove everything
+├── docker-compose.yml         # the whole architecture
+├── docker-compose.deploy.yml  # override used on the server: run the image built by CI
+├── .env.example               # variables; provision.sh copies it to .env
 ├── app/
 │   ├── Dockerfile
 │   ├── .dockerignore
 │   ├── package.json
 │   ├── package-lock.json
-│   └── server.js          # the Node.js app
+│   └── server.js              # the Node.js app
 ├── mongo/init/
-│   └── 01-seed.js         # seed data, runs on first boot
+│   └── 01-seed.js             # seed data, runs on first boot
 ├── nginx/
-│   └── default.conf       # load balancer config
-└── docs/                  # images used in this README
+│   └── default.conf           # load balancer config
+├── .github/workflows/
+│   └── ci-cd.yml              # the pipeline: test, build, push, deploy
+├── infra/                     # Terraform: everything on AWS
+│   ├── apply.sh / destroy.sh  # create / delete the infrastructure
+│   ├── network.tf             # VPC, subnet, internet gateway, firewall
+│   ├── ec2.tf                 # the server and its role
+│   ├── user_data.sh.tftpl     # the server's first-boot script
+│   ├── ecr.tf                 # image registry
+│   ├── deploy.tf              # GitHub OIDC role + the SSM deploy document
+│   └── budget.tf              # cost alert
+└── docs/                      # images used in this README
 ```
 
 ## Known limitations and production next steps
@@ -219,7 +230,87 @@ This is sized for a home assignment. In production I would change:
   to it fails. A cloud load balancer probes `/health` actively.
 - **Secrets in a file.** Use a secrets manager (for example AWS Secrets Manager).
 - **No monitoring.** Add metrics and central logs.
+- **A deploy causes a few seconds of errors**, because Compose replaces both
+  app replicas at once. A rolling update (start a new replica, wait until it
+  is healthy, then remove an old one) would make it zero-downtime.
 
 ## CI/CD on AWS
 
-*Coming in the next step.*
+Every push is tested, and every push to `main` is deployed to a server on
+AWS. The pipeline is `.github/workflows/ci-cd.yml`; the AWS side is Terraform
+in `infra/`.
+
+```mermaid
+flowchart LR
+  dev(["git push / pull request"]) --> test
+  subgraph gha["GitHub Actions"]
+    test["CI: provision the whole stack<br/>in the runner and test it"]
+    build["Build the image,<br/>tag = commit SHA"]
+    test -->|"main only"| build
+  end
+  build -->|"OIDC: temporary credentials"| ecr[("Amazon ECR")]
+  build -->|"SSM: deploy commit SHA"| ec2
+  subgraph aws["AWS, eu-central-1"]
+    ecr
+    ec2["EC2 t3.micro, Ubuntu<br/>same Docker Compose stack"]
+  end
+  ecr -->|"pull image"| ec2
+  user(["Browser"]) -->|"port 80"| ec2
+```
+
+### What the pipeline does
+
+| Job | When | Steps |
+|---|---|---|
+| **Provision and test** (CI) | every pull request and every push | Runs `./provision.sh` inside the GitHub runner, so the real stack starts from scratch. Then tests the buttons, the version label, and that the page survives one replica going down. |
+| **Deploy to AWS** (CD) | pushes to `main`, after CI passed | 1. Logs in to AWS with OIDC. 2. Builds the image and pushes it to ECR, tagged with the commit SHA. 3. Tells the server, through AWS SSM, to deploy that SHA. 4. Checks that the live site reports that exact SHA. |
+
+The page footer and `/health` show the running version, so you can always
+see which commit is live.
+
+### What Terraform creates
+
+| Resource | Purpose |
+|---|---|
+| VPC, public subnet, internet gateway, route table | A small network of its own. No NAT gateway, which would cost money. |
+| Security group | Inbound port 80 only. **There is no SSH port.** |
+| EC2 instance (`t3.micro`, Ubuntu 24.04) | Runs the same Compose stack. On first boot it installs Docker, clones this repo and runs `./provision.sh`. |
+| Instance role | Lets SSM manage the server and lets it pull from ECR. No keys on disk. |
+| ECR repository | Immutable tags, scan on push, keeps the last 5 images. |
+| SSM document | The fixed deploy script. Its only input is a 40-character commit SHA. |
+| GitHub OIDC role | Can be assumed only by this repository's `main` branch. May only push to this ECR repository and start this one SSM document on this one instance. |
+| Budget | Emails an alert as soon as the account spends one cent. |
+
+### Security choices
+
+- **No AWS keys in GitHub.** The job proves who it is with a short-lived OIDC
+  token and receives temporary credentials.
+- **No SSH.** Deploys and shell access go through AWS SSM, which is
+  authenticated with IAM and logged.
+- **The pipeline cannot run arbitrary commands on the server.** It can only
+  ask for "deploy commit X".
+- **The database password never leaves the server.** `provision.sh` generates
+  it there; GitHub and Terraform never see it.
+- **Build once.** The server runs the image CI built and tested, not a rebuild.
+- **Actions are pinned to commit hashes**, not to movable version tags.
+
+### Run it yourself
+
+You need Terraform, the AWS CLI with credentials, and the GitHub CLI (`gh`).
+
+```bash
+cd infra
+cp terraform.tfvars.example terraform.tfvars   # set your email
+./apply.sh       # create everything, connect the pipeline, wait for the site
+./destroy.sh     # delete everything again
+```
+
+`apply.sh` stores Terraform's outputs (role, region, instance, URL) as GitHub
+repository *variables*. None of them is secret. While they exist, pushes to
+`main` are deployed; `destroy.sh` removes them, and the deploy job is then
+skipped.
+
+### Cost
+
+Everything fits the AWS free tier, and `./destroy.sh` removes all of it.
+Terraform state is a local file, so nothing is left in the account.
