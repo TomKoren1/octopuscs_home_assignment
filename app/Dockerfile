@@ -14,6 +14,11 @@ RUN npm ci --omit=dev && npm cache clean --force
 # 2) Copy the application code (changes often -> last layer)
 COPY server.js ./
 
+# Version label, set by CI to the git commit SHA (--build-arg APP_VERSION=...).
+# Declared late so a new SHA does not invalidate the cached layers above.
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 # Do not run as root. The `node` user already exists in the base image.
 USER node
 

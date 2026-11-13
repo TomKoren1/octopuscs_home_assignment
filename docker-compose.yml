@@ -1,5 +1,4 @@
-# Fixed project name: container/network names are the same no matter
-# which folder the repo is cloned into (e.g. octopus-apples-app-1).
+
 name: octopus-apples
 
 services:
@@ -41,7 +40,10 @@ services:
 
 
   app:
-    build: ./app
+    build:
+      context: ./app
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}    # shown on the page and in /health
     environment:
       MONGO_URL: mongodb://mongo:27017      
       MONGO_DB: store

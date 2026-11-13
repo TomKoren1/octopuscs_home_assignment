@@ -1,0 +1,32 @@
+#!/bin/bash
+# First-boot script (cloud-init runs it once, as root).
+# Log: /var/log/cloud-init-output.log
+set -euxo pipefail
+export HOME=/root
+export DEBIAN_FRONTEND=noninteractive
+
+# 1 GB of swap: the instance has only 1 GB of RAM.
+fallocate -l 1G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+# Tools: git, and the ECR credential helper, which lets Docker log in to ECR
+# with the instance role - no stored password, no `docker login`.
+apt-get update -y
+apt-get install -y git curl amazon-ecr-credential-helper
+
+# Docker Engine + Compose plugin
+curl -fsSL https://get.docker.com | sh
+
+mkdir -p /root/.docker
+cat > /root/.docker/config.json <<JSON
+{ "credHelpers": { "${ecr_registry}": "ecr-login" } }
+JSON
+
+# Get the code and bring the stack up, exactly like a local provision.
+# The first pipeline run then replaces the app with the image built by CI.
+git clone "https://github.com/${github_repo}.git" /opt/octopus-apples
+cd /opt/octopus-apples
+APP_VERSION=bootstrap ./provision.sh
