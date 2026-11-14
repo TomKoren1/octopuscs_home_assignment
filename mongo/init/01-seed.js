@@ -1,8 +1,4 @@
-// Runs automatically the FIRST time the MongoDB container starts
-// (i.e. only when the data volume is empty). The official mongo image
-// executes every *.js / *.sh file in /docker-entrypoint-initdb.d/.
-//
-// `db` already points at the database named in MONGO_INITDB_DATABASE.
+// Runs once, when the data volume is empty. `db` is MONGO_INITDB_DATABASE.
 
 db.fruits.insertMany([
   { _id: 1, name: "apples",   qty: 5, rating: 3 },

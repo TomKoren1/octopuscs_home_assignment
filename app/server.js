@@ -2,19 +2,15 @@ const os = require("os");
 const express = require("express");
 const { MongoClient } = require("mongodb");
 
-// --- Configuration: everything comes from environment variables ------------
 const PORT = process.env.PORT || 3000;
 const MONGO_URL = process.env.MONGO_URL || "mongodb://mongo:27017";
 const MONGO_DB = process.env.MONGO_DB || "store";
-// Which build is running: CI bakes the git commit SHA into the image.
 const APP_VERSION = process.env.APP_VERSION || "dev";
 
-// One client for the whole process. It keeps a connection pool and
-// reconnects by itself, so we never open a connection per request.
+// One shared client: it pools connections and reconnects by itself
 const client = new MongoClient(MONGO_URL, {
   serverSelectionTimeoutMS: 3000,
-  // Credentials are passed separately (not inside the URL), so special
-  // characters in the password never need URL-encoding.
+  // Not in the URL, so the password never needs URL-encoding
   auth: process.env.MONGO_USER
     ? { username: process.env.MONGO_USER, password: process.env.MONGO_PASSWORD }
     : undefined,
@@ -23,10 +19,9 @@ const fruits = client.db(MONGO_DB).collection("fruits");
 
 const app = express();
 
-const SEED_APPLES = 5;   // the value from the seed script, used by "Reset"
-const MAX_EMOJIS = 50;   // cap so a big number doesn't flood the page
+const SEED_APPLES = 5; // same as mongo/init/01-seed.js
+const MAX_EMOJIS = 50;
 
-// The page: "Hello World" + the number of apples, read live from the DB.
 app.get("/", async (req, res) => {
   try {
     const apples = await fruits.findOne({ name: "apples" });
@@ -63,11 +58,10 @@ app.get("/", async (req, res) => {
   }
 });
 
-// Buttons. Both use the Post/Redirect/Get pattern: change the DB, then
-// redirect (303) back to "/", so refreshing the page never re-submits.
+// Post/Redirect/Get: refreshing the page never re-submits the form
 app.post("/apples", async (req, res) => {
   try {
-    // $inc is atomic in MongoDB: two replicas clicking at once never lose a count
+    // $inc is atomic: concurrent clicks on different replicas are never lost
     await fruits.updateOne({ name: "apples" }, { $inc: { qty: 1 } });
     res.redirect(303, "/");
   } catch (err) {
@@ -86,7 +80,6 @@ app.post("/apples/reset", async (req, res) => {
   }
 });
 
-// Health endpoint: used by Docker / the load balancer to know if we are OK.
 app.get("/health", async (req, res) => {
   try {
     await client.db("admin").command({ ping: 1 });
@@ -100,8 +93,7 @@ const server = app.listen(PORT, () => {
   console.log(`Listening on port ${PORT}, database ${MONGO_URL}/${MONGO_DB}`);
 });
 
-// Graceful shutdown: `docker stop` sends SIGTERM. Finish in-flight requests,
-// close the DB connection, then exit - instead of being killed after 10s.
+// `docker stop` sends SIGTERM: finish in-flight requests, then exit
 function shutdown(signal) {
   console.log(`${signal} received, shutting down`);
   server.close(async () => {

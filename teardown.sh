@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Remove everything provision.sh created: containers, networks, the data
-# volume and the locally built app image. Add --keep-data to keep the volume.
+# Remove everything provision.sh created. --keep-data keeps the DB volume.
 set -euo pipefail
 cd "$(dirname "$0")"
 

@@ -1,29 +1,22 @@
 FROM node:24-alpine
 
-# Tells Express (and npm) to run in production mode
 ENV NODE_ENV=production
 
 WORKDIR /app
 
-# 1) Copy ONLY the dependency manifests and install.
-#    This layer is cached and re-used until package*.json changes,
-#    so editing server.js does not trigger a new `npm ci`.
+# Dependencies first: code changes reuse the cached `npm ci` layer
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-# 2) Copy the application code (changes often -> last layer)
 COPY server.js ./
 
-# Version label, set by CI to the git commit SHA (--build-arg APP_VERSION=...).
-# Declared late so a new SHA does not invalidate the cached layers above.
+# Set by CI to the commit SHA; declared late to keep the layers above cached
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
 
-# Do not run as root. The `node` user already exists in the base image.
 USER node
 
-# Documentation only: the port the app listens on inside the container
 EXPOSE 3000
 
-# Exec form: node is PID 1 and receives SIGTERM directly from `docker stop`
+# Exec form: node is PID 1 and gets SIGTERM from `docker stop`
 CMD ["node", "server.js"]

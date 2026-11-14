@@ -6,20 +6,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Least privilege by default; the deploy job asks for more.
 permissions:
   contents: read
 
 jobs:
-  # ---------------------------------------------------------------- CI ----
-  # Runs on every pull request and every push to main. No cloud involved:
-  # the whole architecture is provisioned inside the GitHub runner with the
-  # same script a human would use, then tested.
   test:
     name: Provision and test
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # A newer push to the same PR cancels the older, now pointless, run.
     concurrency:
       group: test-${{ github.ref }}
       cancel-in-progress: true
@@ -38,9 +32,9 @@ jobs:
         run: |
           count() { curl -fsS localhost | sed -n 's/.*id="apples">\([0-9]*\)<.*/\1/p'; }
           [ "$(count)" = 5 ]
-          curl -fsS -o /dev/null -d '' localhost/apples        # Add an apple
+          curl -fsS -o /dev/null -d '' localhost/apples
           [ "$(count)" = 6 ]
-          curl -fsS -o /dev/null -d '' localhost/apples/reset  # Reset
+          curl -fsS -o /dev/null -d '' localhost/apples/reset
           [ "$(count)" = 5 ]
           curl -fsS localhost/health | grep -q "\"version\":\"${GITHUB_SHA}\""
 
@@ -50,8 +44,6 @@ jobs:
           for i in 1 2 3 4; do curl -fsS -o /dev/null localhost; done
           docker start octopus-apples-app-1
 
-      # Deploy mode, like on the server: run two image versions from a
-      # registry and roll from one to the other under constant traffic.
       - name: Test a deploy with zero downtime (rolling update)
         run: |
           docker run -d -p 127.0.0.1:5000:5000 registry:2
@@ -61,7 +53,6 @@ jobs:
           done
           APP_IMAGE=localhost:5000/apples:v1 ./provision.sh
 
-          # One request every 50 ms during the deploy; record each status code
           ( while true; do curl -s -o /dev/null -m 5 -w '%{http_code}\n' localhost/; sleep 0.05; done > codes.txt ) &
           load=$!
           APP_IMAGE=localhost:5000/apples:v2 ./provision.sh
@@ -75,23 +66,19 @@ jobs:
         if: failure()
         run: docker compose logs --tail=100
 
-  # ---------------------------------------------------------------- CD ----
-  # Runs only for main, only after the tests passed, and only while the AWS
-  # infrastructure exists (infra/apply.sh sets the repository variables,
-  # infra/destroy.sh removes them - then this job is skipped, not failed).
+  # Skipped (not failed) while the AWS infra is down: infra/apply.sh sets the variables
   deploy:
     name: Deploy to AWS
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ROLE_ARN != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    # Never run two deploys at once, and never cancel one half-way.
     concurrency:
       group: deploy
       cancel-in-progress: false
     permissions:
       contents: read
-      id-token: write        # lets the job request an OIDC token for AWS
+      id-token: write # OIDC token for AWS
     env:
       IMAGE: ${{ vars.ECR_REPOSITORY_URL }}:${{ github.sha }}
       EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
@@ -100,9 +87,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # No AWS keys are stored in GitHub. The job proves its identity with a
-      # short-lived OIDC token and receives temporary credentials for a role
-      # that only the main branch of this repository may assume.
       - name: Log in to AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
@@ -114,10 +98,9 @@ jobs:
 
       - name: Build and push the image, tagged with the commit SHA
         run: |
-          # Tags are immutable in ECR. If this commit was already pushed
-          # (a re-run), reuse the image instead of failing.
-          repo="${IMAGE%%:*}"      # registry/name, without the tag
-          repo="${repo#*/}"        # name only
+          # Tags are immutable: on a re-run, reuse the existing image
+          repo="${IMAGE%%:*}"
+          repo="${repo#*/}"
           if aws ecr describe-images --repository-name "$repo" \
                --image-ids imageTag="$GITHUB_SHA" >/dev/null 2>&1; then
             echo "Image $IMAGE already exists - skipping build"
@@ -126,8 +109,6 @@ jobs:
             docker push "$IMAGE"
           fi
 
-      # The role cannot run arbitrary commands on the server. It may only
-      # start one SSM document, whose single parameter is a commit SHA.
       - name: Deploy on the server (AWS SSM)
         run: |
           cmd_id="$(aws ssm send-command \
@@ -153,12 +134,10 @@ jobs:
 
       - name: Smoke test the live site
         run: |
-          # Both replicas must report the commit we just deployed...
           for i in 1 2 3 4; do
             curl -fsS --retry 5 --retry-delay 3 --retry-all-errors "$APP_URL/health" \
               | grep -q "\"version\":\"${GITHUB_SHA}\""
           done
-          # ...and the page must show an apple count.
           apples="$(curl -fsS "$APP_URL" | sed -n 's/.*id="apples">\([0-9]*\)<.*/\1/p')"
           [ -n "$apples" ]
           echo "Live at $APP_URL - version ${GITHUB_SHA:0:7}, $apples apples" >> "$GITHUB_STEP_SUMMARY"

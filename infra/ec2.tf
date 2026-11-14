@@ -1,4 +1,3 @@
-# Latest Ubuntu 24.04 LTS image published by Canonical.
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
@@ -8,11 +7,6 @@ data "aws_ami" "ubuntu" {
     values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
   }
 }
-
-# ---- Identity of the server -------------------------------------------------
-# The instance gets a role (no keys on disk). It allows two things:
-#   - AWS SSM may manage it (this is how deploys reach it, instead of SSH)
-#   - it may PULL images from our ECR repository
 
 resource "aws_iam_role" "instance" {
   name = "${var.project}-instance"
@@ -64,8 +58,6 @@ resource "aws_iam_instance_profile" "instance" {
   role = aws_iam_role.instance.name
 }
 
-# ---- The server -------------------------------------------------------------
-
 resource "aws_instance" "app" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
@@ -73,20 +65,18 @@ resource "aws_instance" "app" {
   vpc_security_group_ids = [aws_security_group.web.id]
   iam_instance_profile   = aws_iam_instance_profile.instance.name
 
-  # First-boot script: swap, Docker, clone the repo, ./provision.sh
   user_data = templatefile("${path.module}/user_data.sh.tftpl", {
     github_repo  = var.github_repo
     ecr_registry = split("/", aws_ecr_repository.app.repository_url)[0]
   })
   user_data_replace_on_change = true
 
-  # T3 instances default to "unlimited" CPU credits, which can cost money
-  # under sustained load. "standard" can never exceed the free allowance.
+  # The T3 default, "unlimited", can cost money under sustained load
   credit_specification {
     cpu_credits = "standard"
   }
 
-  # Require IMDSv2 (session tokens) for the instance metadata service.
+  # IMDSv2 only
   metadata_options {
     http_tokens = "required"
   }
@@ -97,12 +87,12 @@ resource "aws_instance" "app" {
     encrypted   = true
   }
 
-  # A newer Ubuntu image must not silently replace a running server.
+  # A newer Ubuntu image must not replace the running server
   lifecycle {
     ignore_changes = [ami]
   }
 
-  # The instance needs internet access on first boot.
+  # Needs internet on first boot
   depends_on = [aws_route_table_association.public]
 
   tags = { Name = var.project }

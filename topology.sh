@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Visual demonstration of the RUNNING architecture: containers, networks,
-# IP addresses, volumes and the load balancer in action. Everything below is
-# read live from Docker - nothing is hard-coded.
+# Show the running architecture, read live from Docker.
 set -euo pipefail
 cd "$(dirname "$0")"
 

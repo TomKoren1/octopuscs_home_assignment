@@ -8,23 +8,12 @@ terraform {
     }
   }
 
-  # State is kept in a local file (terraform.tfstate, git-ignored).
-  # That is deliberate for this exercise: one person, apply-then-destroy,
-  # and nothing left behind in the account. A team would use an S3 backend
-  # with locking instead:
-  #
-  #   backend "s3" {
-  #     bucket       = "my-terraform-state"
-  #     key          = "octopus-apples/terraform.tfstate"
-  #     region       = "eu-central-1"
-  #     use_lockfile = true
-  #   }
+  # Local state on purpose (one person, apply then destroy). A team would use S3 with locking.
 }
 
 provider "aws" {
   region = var.region
 
-  # Every resource gets these tags: easy to find, easy to audit.
   default_tags {
     tags = {
       Project   = var.project

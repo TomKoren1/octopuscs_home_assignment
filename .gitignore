@@ -1,7 +1,6 @@
 node_modules/
 .env
 
-# Terraform: local state and personal settings never go to git
 .terraform/
 *.tfstate
 *.tfstate.*

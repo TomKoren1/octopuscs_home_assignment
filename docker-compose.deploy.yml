@@ -1,11 +1,4 @@
-# Override file used on the server (CD). It is layered on top of
-# docker-compose.yml:
-#   docker compose -f docker-compose.yml -f docker-compose.deploy.yml ...
-# provision.sh does this automatically when APP_IMAGE is set.
-
+# Added by provision.sh when APP_IMAGE is set: run the CI-built image instead of building
 services:
   app:
-    # Run the exact image that CI built and pushed to the registry
-    # (e.g. <account>.dkr.ecr.eu-central-1.amazonaws.com/octopus-apples:<git-sha>)
-    # instead of building from source on the server.
     image: ${APP_IMAGE:?APP_IMAGE must be set to the full image reference}

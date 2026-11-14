@@ -1,6 +1,4 @@
-# A small network of our own: one VPC, one public subnet, an internet
-# gateway. There is deliberately NO NAT gateway (it costs money and is only
-# needed for private subnets).
+# No NAT gateway on purpose: it costs money and only private subnets need it.
 
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -24,7 +22,6 @@ resource "aws_subnet" "public" {
   tags = { Name = "${var.project}-public" }
 }
 
-# "Public" subnet = its route table sends 0.0.0.0/0 to the internet gateway.
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
@@ -41,8 +38,6 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Firewall for the server: HTTP in, anything out. No SSH port at all -
-# administration goes through AWS Systems Manager (SSM).
 resource "aws_security_group" "web" {
   name        = "${var.project}-web"
   description = "HTTP in, everything out, no SSH"

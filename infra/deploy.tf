@@ -1,13 +1,5 @@
-# ---- How GitHub Actions deploys ----------------------------------------------
-#
-#   GitHub job --(OIDC token)--> IAM role --> push image to ECR
-#                                        \--> start ONE SSM document on ONE instance
-#
-# No AWS access keys exist anywhere. The role can only be assumed by the
-# main branch of our repository, and it cannot run arbitrary commands on
-# the server: only the fixed script below, with a commit SHA as its input.
-
-# The script that runs on the server for each deploy.
+# GitHub Actions deploys with OIDC (no AWS keys). Its role may only push to our
+# ECR repo and run this one document, whose only input is a commit SHA.
 resource "aws_ssm_document" "deploy" {
   name            = "${var.project}-deploy"
   document_type   = "Command"
@@ -20,7 +12,7 @@ resource "aws_ssm_document" "deploy" {
       ImageTag = {
         type           = "String"
         description    = "Git commit SHA = image tag to deploy"
-        allowedPattern = "^[0-9a-f]{40}$" # nothing but a full SHA is accepted
+        allowedPattern = "^[0-9a-f]{40}$"
       }
     }
     mainSteps = [{
@@ -33,12 +25,9 @@ resource "aws_ssm_document" "deploy" {
           "set -eu",
           "export HOME=/root",
           "cd /opt/octopus-apples",
-          # Bring compose files and scripts to the same commit as the image
           "git fetch --quiet origin",
           "git checkout --quiet --force {{ ImageTag }}",
-          # Pull that image from ECR, restart, wait for health, smoke-test
           "APP_IMAGE=${aws_ecr_repository.app.repository_url}:{{ ImageTag }} ./provision.sh",
-          # Free disk space: remove images that are no longer used
           "docker image prune -af >/dev/null",
         ]
       }
@@ -46,8 +35,6 @@ resource "aws_ssm_document" "deploy" {
   })
 }
 
-# GitHub's OIDC identity provider: created here, or looked up if the
-# account already has one.
 resource "aws_iam_openid_connect_provider" "github" {
   count = var.create_github_oidc_provider ? 1 : 0
 
@@ -72,7 +59,6 @@ locals {
 resource "aws_iam_role" "deploy" {
   name = "${var.project}-github-deploy"
 
-  # WHO may assume the role: GitHub Actions jobs of our repo's main branch.
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -89,7 +75,6 @@ resource "aws_iam_role" "deploy" {
   })
 }
 
-# WHAT the role may do: push to one repository, run one document on one instance.
 resource "aws_iam_role_policy" "deploy" {
   name = "deploy"
   role = aws_iam_role.deploy.id

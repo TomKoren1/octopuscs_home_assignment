@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Create (or update) the AWS infrastructure, connect the GitHub pipeline to
-# it, and wait until the site answers.
-#
-# Needs: terraform, aws CLI credentials, gh CLI logged in to GitHub.
+# Create the AWS infra, connect the pipeline to it, wait for the site. Needs terraform, aws, gh.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -14,8 +11,7 @@ log "Terraform: plan and apply (you will be asked to confirm)"
 terraform init -input=false >/dev/null
 terraform apply "$@"
 
-# The pipeline reads these repository VARIABLES (none of them is a secret).
-# While they exist, pushes to main are deployed.
+# Not secrets. While they exist, pushes to main are deployed.
 log "Publishing the outputs to GitHub repository variables"
 repo="$(terraform output -raw github_repo)"
 gh variable set AWS_ROLE_ARN       --repo "$repo" --body "$(terraform output -raw deploy_role_arn)"

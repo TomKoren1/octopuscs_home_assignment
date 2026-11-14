@@ -5,8 +5,6 @@ cd "$(dirname "$0")"
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
-# First disconnect the pipeline: without these variables the deploy job is
-# skipped (not failed) on the next push.
 log "Removing the GitHub repository variables"
 repo="$(terraform output -raw github_repo 2>/dev/null || true)"
 if [ -n "$repo" ]; then
