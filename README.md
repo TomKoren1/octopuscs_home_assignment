@@ -9,7 +9,8 @@ app replicas and MongoDB. The whole thing is provisioned with one script.
 ## Quick start
 
 Requirements: a Linux host with `git`, `curl`, and port 80 free.
-Docker is installed automatically if it is missing (this needs `sudo`).
+Docker is installed automatically if it is missing, with Docker's official
+install script (this needs `sudo`).
 
 ```bash
 git clone https://github.com/TomKoren1/octopuscs_home_assignment.git
@@ -183,6 +184,25 @@ docker compose restart mongo
 docker compose exec nginx nc -zw2 mongo 27017   # "bad address 'mongo'"
 ```
 
+## Extras beyond the assignment
+
+A few small additions I made along the way:
+
+- **Add-apple and reset buttons.** The count changes in MongoDB, so any
+  replica shows the same number. The update uses `$inc`, which is atomic.
+- **Version label.** The page footer and `/health` show which commit is
+  running.
+- **Smoke test that compares with the database.** `provision.sh` checks that
+  the page shows the same number MongoDB holds, not a hard-coded 5.
+- **Failover test in CI.** One replica is stopped and the page must keep
+  working.
+- **Deploy without keys or SSH.** GitHub logs in to AWS with OIDC, and the
+  server is reached only through SSM.
+
+The CI/CD work was added through pull requests
+([#1](https://github.com/TomKoren1/octopuscs_home_assignment/pull/1),
+[#2](https://github.com/TomKoren1/octopuscs_home_assignment/pull/2)).
+
 ## Repository layout
 
 ```
@@ -273,7 +293,7 @@ see which commit is live.
 |---|---|
 | VPC, public subnet, internet gateway, route table | A small network of its own. No NAT gateway, which would cost money. |
 | Security group | Inbound port 80 only. **There is no SSH port.** |
-| EC2 instance (`t3.micro`, Ubuntu 24.04) | Runs the same Compose stack. On first boot it installs Docker, clones this repo and runs `./provision.sh`. |
+| EC2 instance (`t3.micro`, Ubuntu 24.04) | Runs the same Compose stack. On first boot it installs Docker from Ubuntu's packages (they include the ECR credential helper, and mixing them with Docker's own packages breaks the daemon), clones this repo and runs `./provision.sh`. |
 | Instance role | Lets SSM manage the server and lets it pull from ECR. No keys on disk. |
 | ECR repository | Immutable tags, scan on push, keeps the last 5 images. |
 | SSM document | The fixed deploy script. Its only input is a 40-character commit SHA. |
@@ -310,5 +330,6 @@ skipped.
 
 ### Cost
 
-Everything fits the AWS free tier, and `./destroy.sh` removes all of it.
+Running it for a few days costs cents, which the AWS free tier or free-plan
+credits cover. `./destroy.sh` removes all of it.
 Terraform state is a local file, so nothing is left in the account.

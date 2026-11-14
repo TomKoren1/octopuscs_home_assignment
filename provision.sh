@@ -39,12 +39,12 @@ if [ -n "${APP_IMAGE:-}" ]; then
   # Deploy mode (used by CD): run a pre-built image from a registry.
   log "Pulling ${APP_IMAGE} and starting containers (waiting for healthchecks)"
   COMPOSE="$DOCKER compose -f docker-compose.yml -f docker-compose.deploy.yml"
-  $COMPOSE pull app || die "Could not pull ${APP_IMAGE}"
+  $COMPOSE pull --quiet app || die "Could not pull ${APP_IMAGE}"
   $COMPOSE up -d --no-build --wait || die "Stack failed to start"
 else
   # Default mode: build the app image from source.
   log "Building images and starting containers (waiting for healthchecks)"
-  $DOCKER compose up -d --build --wait \
+  $DOCKER compose up -d --build --wait --quiet-pull \
     || die "Stack failed to start. If port ${HTTP_PORT} is busy, retry with: HTTP_PORT=8080 ./provision.sh"
 fi
 
