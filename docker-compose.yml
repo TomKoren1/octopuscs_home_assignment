@@ -35,7 +35,10 @@ services:
     networks:
       - backend
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      # Cheap TCP check on the container's network address (mongosh costs ~1 s
+      # of CPU per run). The temporary init server listens on 127.0.0.1 only,
+      # so this passes only once the real server is reachable by the app.
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/$$(hostname -i)/27017"]
       interval: 5s
       timeout: 5s
       retries: 10
