@@ -12,13 +12,16 @@ mkswap /swapfile
 swapon /swapfile
 echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
-# Tools: git, and the ECR credential helper, which lets Docker log in to ECR
-# with the instance role - no stored password, no `docker login`.
+# Docker, Compose, git and the ECR credential helper - all from Ubuntu's own
+# repositories. Mixing these with Docker's get.docker.com packages breaks the
+# daemon (both ship docker.service/docker.socket), so we use one source only.
+# The credential helper lets Docker log in to ECR with the instance role:
+# no stored password, no `docker login`.
 apt-get update -y
-apt-get install -y git curl amazon-ecr-credential-helper
-
-# Docker Engine + Compose plugin
-curl -fsSL https://get.docker.com | sh
+apt-get install -y git curl docker.io docker-compose-v2 amazon-ecr-credential-helper
+systemctl enable --now docker
+docker version --format 'Docker {{.Server.Version}}'
+docker compose version
 
 mkdir -p /root/.docker
 cat > /root/.docker/config.json <<JSON
