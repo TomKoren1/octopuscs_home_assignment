@@ -84,10 +84,11 @@ compromised, it would have no network path to the database.
 ### nginx: load balancer (`nginx/default.conf`)
 
 - Official `nginx:1.28-alpine` image with one config file mounted read-only.
-- `upstream app_servers { server app:3000 resolve; }`: Docker's internal DNS
+- `upstream app_servers { server app:3000; }`: Docker's internal DNS
   returns one IP per `app` replica, and nginx balances across all of them.
-- `resolver 127.0.0.11 valid=5s`: nginx re-asks Docker's DNS every 5 seconds,
-  so scaling the app up or down needs no nginx reload.
+- nginx looks these addresses up when it starts or reloads. Whenever replicas
+  may have changed, `provision.sh` runs `nginx -s reload`, which is graceful:
+  requests in progress finish, and nothing is dropped.
 - `proxy_next_upstream`: if a replica is down, the request is retried on the
   next one, so the user does not see an error.
 - `/nginx-health` is answered by nginx itself and used by its healthcheck.
@@ -174,8 +175,9 @@ for i in 1 2 3 4; do curl -s localhost | grep -o 'container: [0-9a-f]*'; done
 docker stop octopus-apples-app-1 && curl -s localhost | grep -o 'container: [0-9a-f]*'
 docker start octopus-apples-app-1
 
-# Scale without touching nginx
+# Scale to 3 replicas, then let nginx pick up the new address
 docker compose up -d --scale app=3 --wait
+docker compose exec nginx nginx -s reload
 
 # Data survives a restart; init scripts do not run again
 docker compose restart mongo
@@ -198,10 +200,14 @@ A few small additions I made along the way:
   working.
 - **Deploy without keys or SSH.** GitHub logs in to AWS with OIDC, and the
   server is reached only through SSM.
+- **Zero-downtime deploys.** New replicas start next to the old ones, and the
+  old ones are removed only once the new ones are healthy. A broken release
+  never replaces a working one.
 
 The CI/CD work was added through pull requests
 ([#1](https://github.com/TomKoren1/octopuscs_home_assignment/pull/1),
-[#2](https://github.com/TomKoren1/octopuscs_home_assignment/pull/2)).
+[#2](https://github.com/TomKoren1/octopuscs_home_assignment/pull/2),
+[#3](https://github.com/TomKoren1/octopuscs_home_assignment/pull/3)).
 
 ## Repository layout
 
@@ -249,9 +255,6 @@ This is sized for a home assignment. In production I would change:
   to it fails. A cloud load balancer probes `/health` actively.
 - **Secrets in a file.** Use a secrets manager (for example AWS Secrets Manager).
 - **No monitoring.** Add metrics and central logs.
-- **A deploy causes a few seconds of errors**, because Compose replaces both
-  app replicas at once. A rolling update (start a new replica, wait until it
-  is healthy, then remove an old one) would make it zero-downtime.
 
 ## CI/CD on AWS
 
@@ -281,11 +284,28 @@ flowchart LR
 
 | Job | When | Steps |
 |---|---|---|
-| **Provision and test** (CI) | every pull request and every push | Runs `./provision.sh` inside the GitHub runner, so the real stack starts from scratch. Then tests the buttons, the version label, and that the page survives one replica going down. |
-| **Deploy to AWS** (CD) | pushes to `main`, after CI passed | 1. Logs in to AWS with OIDC. 2. Builds the image and pushes it to ECR, tagged with the commit SHA. 3. Tells the server, through AWS SSM, to deploy that SHA. 4. Checks that the live site reports that exact SHA. |
+| **Provision and test** (CI) | every pull request and every push | Runs `./provision.sh` inside the GitHub runner, so the real stack starts from scratch. Then tests the buttons, the version label, that the page survives one replica going down, and that a deploy causes zero failed requests. |
+| **Deploy to AWS** (CD) | pushes to `main`, after CI passed | 1. Logs in to AWS with OIDC. 2. Builds the image and pushes it to ECR, tagged with the commit SHA. 3. Tells the server, through AWS SSM, to deploy that SHA with a rolling update. 4. Checks that the live site reports that exact SHA. |
 
 The page footer and `/health` show the running version, so you can always
 see which commit is live.
+
+### Zero-downtime deploys (rolling update)
+
+Compose has no built-in rolling update, so `provision.sh` does it in deploy
+mode:
+
+```
+before:  app-1 (old)  app-2 (old)
+1.       app-1 (old)  app-2 (old)  app-3 (new)  app-4 (new)   start new replicas, wait until healthy
+2.       nginx reload: it now sends requests to all four
+3.                                 app-3 (new)  app-4 (new)   stop the old ones (each finishes its requests)
+4.       nginx reload: only the new ones remain
+```
+
+If the new replicas never become healthy, they are removed, the old version
+keeps running, and the deploy fails. MongoDB and nginx are single containers
+and are only restarted when their own configuration changes.
 
 ### What Terraform creates
 
