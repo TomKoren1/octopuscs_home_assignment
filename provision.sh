@@ -35,11 +35,41 @@ HTTP_PORT="${HTTP_PORT:-80}"
 URL="http://localhost:${HTTP_PORT}"
 
 # --- 3. Build (or pull) + start ---------------------------------------------
+# nginx looks up the app replicas' addresses when it starts or reloads.
+# Whenever replicas may have been replaced, reload it: gracefully, so no
+# request is dropped. This also applies changes to nginx/default.conf.
+reload_nginx() { $DOCKER compose exec -T nginx nginx -s reload >/dev/null 2>&1 || true; }
+
 if [ -n "${APP_IMAGE:-}" ]; then
   # Deploy mode (used by CD): run a pre-built image from a registry.
   log "Pulling ${APP_IMAGE} and starting containers (waiting for healthchecks)"
   COMPOSE="$DOCKER compose -f docker-compose.yml -f docker-compose.deploy.yml"
   $COMPOSE pull --quiet app || die "Could not pull ${APP_IMAGE}"
+
+  old_apps="$($COMPOSE ps -q app)"
+  if [ -n "$old_apps" ]; then
+    # Rolling update: nginx always has a healthy replica to send requests to.
+    # 1. Start new replicas NEXT TO the old ones and wait until healthy.
+    #    (--no-recreate keeps the old containers; the new ones get the new image)
+    log "Rolling update: starting new replicas next to the old ones"
+    if ! $COMPOSE up -d --no-deps --no-build --no-recreate --scale app=4 --wait app; then
+      # Roll back: scaling down removes the newest containers (the broken ones)
+      $COMPOSE up -d --no-deps --no-build --no-recreate --scale app=2 app || true
+      die "New replicas did not become healthy - kept the old version"
+    fi
+    # 2. Tell nginx about the new replicas.
+    reload_nginx
+    sleep 2
+    # 3. Remove the old replicas. `docker stop` sends SIGTERM, so each one
+    #    finishes its in-flight requests; nginx retries anything refused.
+    log "Rolling update: removing the old replicas"
+    $DOCKER stop $old_apps >/dev/null
+    $DOCKER rm $old_apps >/dev/null
+    # 4. Tell nginx the old replicas are gone.
+    reload_nginx
+  fi
+  # Start anything not running yet (first boot), and apply config changes to
+  # nginx/mongo if there are any. Already up-to-date containers are left alone.
   $COMPOSE up -d --no-build --wait || die "Stack failed to start"
 else
   # Default mode: build the app image from source.
@@ -47,6 +77,7 @@ else
   $DOCKER compose up -d --build --wait --quiet-pull \
     || die "Stack failed to start. If port ${HTTP_PORT} is busy, retry with: HTTP_PORT=8080 ./provision.sh"
 fi
+reload_nginx
 
 # --- 4. Smoke test ---------------------------------------------------------
 # The requirement: "the html page returns the number of apples in the DB".

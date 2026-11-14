@@ -50,6 +50,27 @@ jobs:
           for i in 1 2 3 4; do curl -fsS -o /dev/null localhost; done
           docker start octopus-apples-app-1
 
+      # Deploy mode, like on the server: run two image versions from a
+      # registry and roll from one to the other under constant traffic.
+      - name: Test a deploy with zero downtime (rolling update)
+        run: |
+          docker run -d -p 127.0.0.1:5000:5000 registry:2
+          for v in v1 v2; do
+            docker build -q --build-arg APP_VERSION=$v -t localhost:5000/apples:$v app
+            docker push -q localhost:5000/apples:$v
+          done
+          APP_IMAGE=localhost:5000/apples:v1 ./provision.sh
+
+          # One request every 50 ms during the deploy; record each status code
+          ( while true; do curl -s -o /dev/null -m 5 -w '%{http_code}\n' localhost/; sleep 0.05; done > codes.txt ) &
+          load=$!
+          APP_IMAGE=localhost:5000/apples:v2 ./provision.sh
+          kill $load
+
+          echo "Requests during the deploy (count, status):"; sort codes.txt | uniq -c
+          [ "$(grep -cv '^200$' codes.txt)" = 0 ]
+          curl -fsS localhost/health | grep -q '"version":"v2"'
+
       - name: Container logs (only if something failed)
         if: failure()
         run: docker compose logs --tail=100
