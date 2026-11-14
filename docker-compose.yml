@@ -22,6 +22,9 @@ services:
 
   mongo:
     image: mongo:8.0
+    # Cap MongoDB's cache (default: ~50% of RAM - 1 GB, at least 256 MB) so the
+    # stack fits a 1 GB server. Our data is tiny; 0.25 GB is plenty.
+    command: ["--wiredTigerCacheSizeGB", "0.25"]
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}       
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}   
